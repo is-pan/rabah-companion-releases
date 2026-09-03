@@ -298,14 +298,6 @@ jq -n \
     checksums_url: $checksums_url
   }' > "$latest_json"
 
-# Publish the manifest last. Consumers following latest.json never observe a
-# manifest that points at incomplete version objects.
-upload_file \
-  "$latest_json" \
-  "latest.json" \
-  "application/json; charset=utf-8" \
-  "no-cache, no-store, must-revalidate"
-
 if [[ "$updater_enabled" == "true" ]]; then
   updater_json="$release_dir/updater-latest.json"
   windows_signature="$(<"$release_dir/$windows_signature_asset")"
@@ -348,6 +340,14 @@ else
     --endpoint-url "$endpoint" \
     >/dev/null
 fi
+
+# Publish the ordinary manifest last. When updater metadata is required it is
+# already available, so download-page and in-app consumers converge together.
+upload_file \
+  "$latest_json" \
+  "latest.json" \
+  "application/json; charset=utf-8" \
+  "no-cache, no-store, must-revalidate"
 
 printf 'Removing superseded version objects from the isolated download bucket...\n'
 while IFS= read -r object_key; do
