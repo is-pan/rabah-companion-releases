@@ -40,8 +40,23 @@ Developer ID signing, hardened runtime, notarization, and stapling.
 ## Download policy
 
 - GitHub Releases: permanent version archive and fallback download source
-- `download.rabah.ai`: planned primary download source for the latest supported
-  version only
+- `download.rabah.ai`: primary download source for the latest complete macOS +
+  Windows version only
+
+The fixed download paths are:
+
+- `https://download.rabah.ai/latest/Rabah-Companion-Windows-x64-setup.exe`
+- `https://download.rabah.ai/latest/Rabah-Companion-macOS-arm64.dmg`
+- `https://download.rabah.ai/latest/SHA256SUMS.txt`
+- `https://download.rabah.ai/latest.json`
+
+The `latest.json` manifest points at immutable, versioned R2 object URLs and
+includes each installer's SHA-256 digest and byte size. GitHub Actions selects
+the highest semantic version that has both platform installers and a checksum
+file. This includes pre-releases while Rabah Companion remains in testing.
+
+R2 retains only that selected version. Older installers remain available from
+GitHub Releases.
 
 ## Security
 
