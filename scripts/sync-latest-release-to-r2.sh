@@ -77,7 +77,7 @@ for candidate_tag in "${candidate_tags[@]}"; do
 
   IFS=. read -r version_major version_minor version_patch <<<"$candidate_version"
   requires_updater=false
-  if (( version_major > 0 || version_minor > 1 || (version_minor == 1 && version_patch >= 41) )); then
+  if (( version_major > 0 || version_minor > 1 || (version_minor == 1 && version_patch >= 42) )); then
     requires_updater=true
   fi
 

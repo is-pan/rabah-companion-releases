@@ -50,7 +50,7 @@ The fixed download paths are:
 - `https://download.rabah.ai/latest/SHA256SUMS.txt`
 - `https://download.rabah.ai/latest.json`
 
-Starting with `0.1.41`, installed applications check the signed Tauri updater
+Starting with `0.1.42`, installed applications check the signed Tauri updater
 manifest at `https://download.rabah.ai/updater/latest.json`. Release assets must
 also contain the Windows installer signature and the signed macOS app archive;
 the R2 workflow rejects incomplete updater releases.
