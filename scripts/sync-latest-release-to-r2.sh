@@ -53,6 +53,9 @@ for candidate_tag in "${candidate_tags[@]}"; do
   candidate_release="$(jq -c --arg tag "$candidate_tag" '.[] | select(.tag_name == $tag)' "$releases_json")"
   candidate_version="${candidate_tag#companion-v}"
   candidate_windows="Rabah-Companion-Windows-x64-v${candidate_version}-setup.exe"
+  candidate_windows_signature="${candidate_windows}.sig"
+  candidate_macos_updater="Rabah-Companion-macOS-arm64-v${candidate_version}.app.tar.gz"
+  candidate_macos_signature="${candidate_macos_updater}.sig"
 
   candidate_macos="$(
     jq -r --arg version "$candidate_version" '
@@ -68,19 +71,41 @@ for candidate_tag in "${candidate_tags[@]}"; do
 
   has_windows="$(jq -r --arg name "$candidate_windows" 'any(.assets[]; .name == $name)' <<<"$candidate_release")"
   has_checksums="$(jq -r 'any(.assets[]; .name == "SHA256SUMS.txt")' <<<"$candidate_release")"
+  has_windows_signature="$(jq -r --arg name "$candidate_windows_signature" 'any(.assets[]; .name == $name)' <<<"$candidate_release")"
+  has_macos_updater="$(jq -r --arg name "$candidate_macos_updater" 'any(.assets[]; .name == $name)' <<<"$candidate_release")"
+  has_macos_signature="$(jq -r --arg name "$candidate_macos_signature" 'any(.assets[]; .name == $name)' <<<"$candidate_release")"
 
-  if [[ "$has_windows" == "true" && "$has_checksums" == "true" && -n "$candidate_macos" ]]; then
+  IFS=. read -r version_major version_minor version_patch <<<"$candidate_version"
+  requires_updater=false
+  if (( version_major > 0 || version_minor > 1 || (version_minor == 1 && version_patch >= 41) )); then
+    requires_updater=true
+  fi
+
+  updater_complete=true
+  if [[ "$requires_updater" == "true" ]] && {
+    [[ "$has_windows_signature" != "true" ]] ||
+    [[ "$has_macos_updater" != "true" ]] ||
+    [[ "$has_macos_signature" != "true" ]];
+  }; then
+    updater_complete=false
+  fi
+
+  if [[ "$has_windows" == "true" && "$has_checksums" == "true" && -n "$candidate_macos" && "$updater_complete" == "true" ]]; then
     selected_release="$candidate_release"
     selected_tag="$candidate_tag"
     version="$candidate_version"
     windows_asset="$candidate_windows"
     macos_asset="$candidate_macos"
+    updater_enabled="$requires_updater"
+    windows_signature_asset="$candidate_windows_signature"
+    macos_updater_asset="$candidate_macos_updater"
+    macos_signature_asset="$candidate_macos_signature"
     break
   fi
 done
 
 if [[ -z "$selected_release" ]]; then
-  printf 'No release contains Windows x64, macOS arm64, and SHA256SUMS.txt assets.\n' >&2
+  printf 'No release contains all required installers, updater signatures, and checksums.\n' >&2
   exit 1
 fi
 
@@ -90,12 +115,22 @@ release_dir="$work_dir/$selected_tag"
 mkdir -p "$release_dir"
 
 printf 'Selected %s (%s)\n' "$selected_tag" "$published_at"
-gh release download "$selected_tag" \
-  --repo "$GITHUB_REPOSITORY" \
-  --dir "$release_dir" \
-  --pattern "$windows_asset" \
-  --pattern "$macos_asset" \
+download_args=(
+  "$selected_tag"
+  --repo "$GITHUB_REPOSITORY"
+  --dir "$release_dir"
+  --pattern "$windows_asset"
+  --pattern "$macos_asset"
   --pattern "SHA256SUMS.txt"
+)
+if [[ "$updater_enabled" == "true" ]]; then
+  download_args+=(
+    --pattern "$windows_signature_asset"
+    --pattern "$macos_updater_asset"
+    --pattern "$macos_signature_asset"
+  )
+fi
+gh release download "${download_args[@]}"
 
 checksum_for() {
   local filename="$1"
@@ -139,6 +174,12 @@ version_prefix="versions/${selected_tag}"
 windows_version_key="${version_prefix}/${windows_asset}"
 macos_version_key="${version_prefix}/${macos_asset}"
 checksums_version_key="${version_prefix}/SHA256SUMS.txt"
+if [[ "$updater_enabled" == "true" ]]; then
+  macos_updater_sha256="$(checksum_for "$macos_updater_asset")"
+  windows_signature_key="${version_prefix}/${windows_signature_asset}"
+  macos_updater_key="${version_prefix}/${macos_updater_asset}"
+  macos_signature_key="${version_prefix}/${macos_signature_asset}"
+fi
 
 upload_file() {
   local source_path="$1"
@@ -179,6 +220,24 @@ upload_file \
   "$checksums_version_key" \
   "text/plain; charset=utf-8" \
   "public, max-age=31536000, immutable"
+if [[ "$updater_enabled" == "true" ]]; then
+  upload_file \
+    "$release_dir/$windows_signature_asset" \
+    "$windows_signature_key" \
+    "text/plain; charset=utf-8" \
+    "public, max-age=31536000, immutable"
+  upload_file \
+    "$release_dir/$macos_updater_asset" \
+    "$macos_updater_key" \
+    "application/gzip" \
+    "public, max-age=31536000, immutable" \
+    "attachment; filename=\"$macos_updater_asset\""
+  upload_file \
+    "$release_dir/$macos_signature_asset" \
+    "$macos_signature_key" \
+    "text/plain; charset=utf-8" \
+    "public, max-age=31536000, immutable"
+fi
 
 printf 'Updating stable latest download paths...\n'
 upload_file \
@@ -246,6 +305,49 @@ upload_file \
   "latest.json" \
   "application/json; charset=utf-8" \
   "no-cache, no-store, must-revalidate"
+
+if [[ "$updater_enabled" == "true" ]]; then
+  updater_json="$release_dir/updater-latest.json"
+  windows_signature="$(<"$release_dir/$windows_signature_asset")"
+  macos_signature="$(<"$release_dir/$macos_signature_asset")"
+  release_notes="$(jq -r '.body // ""' <<<"$selected_release")"
+  jq -n \
+    --arg version "$version" \
+    --arg notes "$release_notes" \
+    --arg pub_date "$published_at" \
+    --arg windows_url "${download_base_url}/${windows_version_key}" \
+    --arg windows_signature "$windows_signature" \
+    --arg macos_url "${download_base_url}/${macos_updater_key}" \
+    --arg macos_signature "$macos_signature" \
+    '{
+      version: $version,
+      notes: $notes,
+      pub_date: $pub_date,
+      platforms: {
+        "windows-x86_64": {
+          url: $windows_url,
+          signature: $windows_signature
+        },
+        "darwin-aarch64": {
+          url: $macos_url,
+          signature: $macos_signature
+        }
+      }
+    }' > "$updater_json"
+  upload_file \
+    "$updater_json" \
+    "updater/latest.json" \
+    "application/json; charset=utf-8" \
+    "no-cache, no-store, must-revalidate"
+  printf 'Updater manifest published for %s (macOS updater SHA-256 %s)\n' \
+    "$selected_tag" "$macos_updater_sha256"
+else
+  aws s3api delete-object \
+    --bucket "$R2_BUCKET_NAME" \
+    --key "updater/latest.json" \
+    --endpoint-url "$endpoint" \
+    >/dev/null
+fi
 
 printf 'Removing superseded version objects from the isolated download bucket...\n'
 while IFS= read -r object_key; do

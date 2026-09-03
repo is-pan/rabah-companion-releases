@@ -50,6 +50,11 @@ The fixed download paths are:
 - `https://download.rabah.ai/latest/SHA256SUMS.txt`
 - `https://download.rabah.ai/latest.json`
 
+Starting with `0.1.41`, installed applications check the signed Tauri updater
+manifest at `https://download.rabah.ai/updater/latest.json`. Release assets must
+also contain the Windows installer signature and the signed macOS app archive;
+the R2 workflow rejects incomplete updater releases.
+
 The `latest.json` manifest points at immutable, versioned R2 object URLs and
 includes each installer's SHA-256 digest and byte size. GitHub Actions selects
 the highest semantic version that has both platform installers and a checksum
