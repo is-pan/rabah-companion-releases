@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-required_commands=(aws gh jq sha256sum sort)
+required_commands=(aws gh jq python3 sha256sum sort)
 for command_name in "${required_commands[@]}"; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     printf 'Required command is missing: %s\n' "$command_name" >&2
@@ -176,6 +176,32 @@ macos_version_key="${version_prefix}/${macos_asset}"
 checksums_version_key="${version_prefix}/SHA256SUMS.txt"
 if [[ "$updater_enabled" == "true" ]]; then
   macos_updater_sha256="$(checksum_for "$macos_updater_asset")"
+  python3 - "$release_dir/$macos_updater_asset" <<'PY'
+import sys
+import tarfile
+
+archive = sys.argv[1]
+expected_root = "Rabah Companion.app"
+with tarfile.open(archive, "r:gz") as package:
+    names = package.getnames()
+
+suspicious = [
+    name for name in names
+    if name.startswith("._")
+    or "/._" in name
+    or name == ".DS_Store"
+    or name.endswith("/.DS_Store")
+]
+top_levels = {name.rstrip("/").split("/", 1)[0] for name in names}
+if suspicious or top_levels != {expected_root} or expected_root not in {
+    name.rstrip("/") for name in names
+}:
+    print("Refusing unsafe macOS updater archive.", file=sys.stderr)
+    print(f"Top-level entries: {sorted(top_levels)}", file=sys.stderr)
+    for name in suspicious:
+        print(f"  {name}", file=sys.stderr)
+    raise SystemExit(1)
+PY
   windows_signature_key="${version_prefix}/${windows_signature_asset}"
   macos_updater_key="${version_prefix}/${macos_updater_asset}"
   macos_signature_key="${version_prefix}/${macos_signature_asset}"
