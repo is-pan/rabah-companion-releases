@@ -86,22 +86,34 @@ upload "$work_dir/macos/Codex-arm64.dmg" "codex/macos/$version/Codex-arm64.dmg" 
 upload "$work_dir/macos/Codex-x64.dmg" "codex/macos/$version/Codex-x64.dmg" "application/x-apple-diskimage" "public, max-age=31536000, immutable"
 
 verify_object() {
-  local file="$1" key="$2" expected_size="$3"
+  local file="$1" key="$2" expected_size="$3" expected_sha256="$4"
   actual_size="$(aws s3api head-object --bucket "$R2_BUCKET_NAME" --key "$key" \
     --endpoint-url "$endpoint" --query ContentLength --output text)"
   [[ "$actual_size" == "$expected_size" ]] || {
     printf 'R2 readback size mismatch for %s: %s != %s\n' "$key" "$actual_size" "$expected_size" >&2
     exit 1
   }
-  # The local digest was computed before upload; a second local digest keeps
-  # this check independent from any mutable HTTP metadata.
-  [[ "$(sha256 "$file")" == "$(sha256 "$file")" ]] || exit 1
+  [[ "$(sha256 "$file")" == "$expected_sha256" ]] || {
+    printf 'Local checksum changed during publish: %s\n' "$file" >&2
+    exit 1
+  }
+  readback="$work_dir/metadata/readback-$(basename "$file")"
+  aws s3 cp "s3://$R2_BUCKET_NAME/$key" "$readback" \
+    --endpoint-url "$endpoint" --only-show-errors
+  [[ "$(stat -c '%s' "$readback")" == "$expected_size" ]] || {
+    printf 'R2 readback byte count mismatch for %s\n' "$key" >&2
+    exit 1
+  }
+  [[ "$(sha256 "$readback")" == "$expected_sha256" ]] || {
+    printf 'R2 readback checksum mismatch for %s\n' "$key" >&2
+    exit 1
+  }
 }
-verify_object "$work_dir/windows/ChatGPT-x64.msix" "codex/windows/$version/ChatGPT-x64.msix" "$wxs"
-verify_object "$work_dir/windows/ChatGPT-arm64.msix" "codex/windows/$version/ChatGPT-arm64.msix" "$was"
-verify_object "$work_dir/windows/ChatGPT-License.xml" "codex/windows/$version/ChatGPT-License.xml" "$lis"
-verify_object "$work_dir/macos/Codex-arm64.dmg" "codex/macos/$version/Codex-arm64.dmg" "$mas"
-verify_object "$work_dir/macos/Codex-x64.dmg" "codex/macos/$version/Codex-x64.dmg" "$mxs"
+verify_object "$work_dir/windows/ChatGPT-x64.msix" "codex/windows/$version/ChatGPT-x64.msix" "$wxs" "$wx"
+verify_object "$work_dir/windows/ChatGPT-arm64.msix" "codex/windows/$version/ChatGPT-arm64.msix" "$was" "$wa"
+verify_object "$work_dir/windows/ChatGPT-License.xml" "codex/windows/$version/ChatGPT-License.xml" "$lis" "$li"
+verify_object "$work_dir/macos/Codex-arm64.dmg" "codex/macos/$version/Codex-arm64.dmg" "$mas" "$ma"
+verify_object "$work_dir/macos/Codex-x64.dmg" "codex/macos/$version/Codex-x64.dmg" "$mxs" "$mx"
 
 catalog="$work_dir/metadata/latest.json"
 jq -n --arg v "$version" --arg t "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
