@@ -33,7 +33,7 @@ download "$official_base/ChatGPT-License.xml" "$work_dir/windows/ChatGPT-License
 download "$official_base/Codex.dmg" "$work_dir/macos/Codex-arm64.dmg"
 download "$official_base/Codex-latest-x64.dmg" "$work_dir/macos/Codex-x64.dmg"
 
-version="$(python3 "$work_dir/windows/ChatGPT-x64.msix" "$work_dir/windows/ChatGPT-arm64.msix" <<'PY'
+version="$(python3 - "$work_dir/windows/ChatGPT-x64.msix" "$work_dir/windows/ChatGPT-arm64.msix" <<'PY'
 import sys, zipfile, xml.etree.ElementTree as ET
 versions = set()
 for path, arch in zip(sys.argv[1:], ("x64", "arm64")):
