@@ -20,6 +20,20 @@ mkdir -p "$work_dir/windows" "$work_dir/macos" "$work_dir/metadata"
 export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
 export AWS_DEFAULT_REGION=auto AWS_REGION=auto AWS_EC2_METADATA_DISABLED=true
 official_base="https://persistent.oaistatic.com/codex-app-prod"
+official_version="$(curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+  --connect-timeout 20 --max-time 30 -sSI "$official_base/ChatGPT-x64.msix" |
+  awk -F': *' 'tolower($1) == "x-ms-meta-package_version" {print $2}' | tr -d '\r' | tail -n1)"
+if [[ "$official_version" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]]; then
+  current_catalog="$work_dir/metadata/current.json"
+  if curl --fail --location --proto '=https' --tlsv1.2 --connect-timeout 20 \
+      --max-time 30 -sS "$base_url/codex/latest.json" -o "$current_catalog"; then
+    current_version="$(jq -r '.platforms["windows-x86_64"].version // empty' "$current_catalog")"
+    if [[ "$current_version" == "$official_version" ]]; then
+      printf 'ChatGPT Desktop %s is already mirrored; nothing to upload.\n' "$official_version"
+      exit 0
+    fi
+  fi
+fi
 
 download() {
   local url="$1" destination="$2"
@@ -70,6 +84,24 @@ upload "$work_dir/windows/ChatGPT-arm64.msix" "codex/windows/$version/ChatGPT-ar
 upload "$work_dir/windows/ChatGPT-License.xml" "codex/windows/$version/ChatGPT-License.xml" "application/xml; charset=utf-8" "public, max-age=31536000, immutable"
 upload "$work_dir/macos/Codex-arm64.dmg" "codex/macos/$version/Codex-arm64.dmg" "application/x-apple-diskimage" "public, max-age=31536000, immutable"
 upload "$work_dir/macos/Codex-x64.dmg" "codex/macos/$version/Codex-x64.dmg" "application/x-apple-diskimage" "public, max-age=31536000, immutable"
+
+verify_object() {
+  local file="$1" key="$2" expected_size="$3"
+  actual_size="$(aws s3api head-object --bucket "$R2_BUCKET_NAME" --key "$key" \
+    --endpoint-url "$endpoint" --query ContentLength --output text)"
+  [[ "$actual_size" == "$expected_size" ]] || {
+    printf 'R2 readback size mismatch for %s: %s != %s\n' "$key" "$actual_size" "$expected_size" >&2
+    exit 1
+  }
+  # The local digest was computed before upload; a second local digest keeps
+  # this check independent from any mutable HTTP metadata.
+  [[ "$(sha256 "$file")" == "$(sha256 "$file")" ]] || exit 1
+}
+verify_object "$work_dir/windows/ChatGPT-x64.msix" "codex/windows/$version/ChatGPT-x64.msix" "$wxs"
+verify_object "$work_dir/windows/ChatGPT-arm64.msix" "codex/windows/$version/ChatGPT-arm64.msix" "$was"
+verify_object "$work_dir/windows/ChatGPT-License.xml" "codex/windows/$version/ChatGPT-License.xml" "$lis"
+verify_object "$work_dir/macos/Codex-arm64.dmg" "codex/macos/$version/Codex-arm64.dmg" "$mas"
+verify_object "$work_dir/macos/Codex-x64.dmg" "codex/macos/$version/Codex-x64.dmg" "$mxs"
 
 catalog="$work_dir/metadata/latest.json"
 jq -n --arg v "$version" --arg t "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
