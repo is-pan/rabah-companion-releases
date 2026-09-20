@@ -14,7 +14,7 @@ done
 
 endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
 base_url="$(printf '%s' "$DOWNLOAD_BASE_URL" | sed 's:/*$::')"
-work_dir="$RUNNER_TEMP/rabah-chatgpt-desktop-r2"
+work_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/rabah-chatgpt-desktop-r2"
 rm -rf "$work_dir"
 mkdir -p "$work_dir/windows" "$work_dir/macos" "$work_dir/metadata"
 export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
@@ -23,7 +23,7 @@ official_base="https://persistent.oaistatic.com/codex-app-prod"
 official_version="$(curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
   --connect-timeout 20 --max-time 30 -sSI "$official_base/ChatGPT-x64.msix" |
   awk -F': *' 'tolower($1) == "x-ms-meta-package_version" {print $2}' | tr -d '\r' | tail -n1)"
-if [[ "$official_version" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]]; then
+if [[ "${FORCE_CHATGPT_DESKTOP_SYNC:-false}" != "true" && "$official_version" =~ ^[0-9]+(\.[0-9]+){2,3}$ ]]; then
   current_catalog="$work_dir/metadata/current.json"
   if curl --fail --location --proto '=https' --tlsv1.2 --connect-timeout 20 \
       --max-time 30 -sS "$base_url/codex/latest.json" -o "$current_catalog"; then
